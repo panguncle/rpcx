@@ -24,6 +24,7 @@ func (s *Server) startGateway(network string, ln net.Listener) net.Listener {
 		return ln
 	}
 
+	// PReader: cmux 是 network multiplexer, 网络多路复用器
 	m := cmux.New(ln)
 
 	rpcxLn := m.Match(rpcxPrefixByteMatcher())
@@ -43,6 +44,7 @@ func (s *Server) startGateway(network string, ln net.Listener) net.Listener {
 	return rpcxLn
 }
 
+// PReader: 匹配这个rpc的proto特定的开始标识符
 func rpcxPrefixByteMatcher() cmux.Matcher {
 	magic := protocol.MagicNumber()
 	return func(r io.Reader) bool {

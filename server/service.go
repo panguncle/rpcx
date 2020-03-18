@@ -107,6 +107,7 @@ func (s *Server) RegisterFunctionName(servicePath string, name string, fn interf
 	return err
 }
 
+
 func (s *Server) register(rcvr interface{}, name string, useName bool) (string, error) {
 	s.serviceMapMu.Lock()
 	defer s.serviceMapMu.Unlock()
@@ -114,6 +115,7 @@ func (s *Server) register(rcvr interface{}, name string, useName bool) (string, 
 	service := new(service)
 	service.typ = reflect.TypeOf(rcvr)
 	service.rcvr = reflect.ValueOf(rcvr)
+	// Indirect 获取指针的指向的数, 不是指针则直接返回
 	sname := reflect.Indirect(service.rcvr).Type().Name() // Type
 	if useName {
 		sname = name
@@ -131,6 +133,8 @@ func (s *Server) register(rcvr interface{}, name string, useName bool) (string, 
 	service.name = sname
 
 	// Install the methods
+	// PReader: 对service中声明的方法进行判断, 挑选出合适定义的方法
+	// 下面这段代码跟golang里面rpc包的代码基本是一直的
 	service.method = suitableMethods(service.typ, true)
 
 	if len(service.method) == 0 {

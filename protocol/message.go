@@ -10,6 +10,21 @@ import (
 	"github.com/smallnest/rpcx/util"
 )
 
+/**
+PReader:
+Protocol:
+Header(12byte): magicNumber(相当于开始标志) (1byte)+
+				version(1byte) +
+				[0(message_type) 0(heart-beat) 0(oneway-request) (0   0 0)(compress-type) (0 0)(message-status)](1byte)	+
+				[ (0000)(serialize-type) (0000)(应该理解为保留吧)](1byte) +
+				Sequence ID (8bytes)
+Body: bodyLen(4bytes)(不包含这4bytes的长度) +
+      servicePathLen(4bytes) + servicePaths +
+      serviceMethodLen(4bytes) + serviceMethod +
+      metaLen(4bytes) + metadata(keyLen(4bytes) + key + valLen(4bytes) + val .....(多组kv))
+	+ payloadLen(4Bytes) + Payload(已经是经过serialize之后进来, 并且compress过的)
+*/
+
 var (
 	// Compressors are compressors supported by rpcx. You can add customized compressor in Compressors.
 	Compressors = map[CompressType]Compressor{
@@ -132,23 +147,48 @@ func (h *Header) SetVersion(v byte) {
 	h[1] = v
 }
 
+/**
+set的时候:
++ 移动地位到需要保存的位置, 然后清空其他不需要的位 ( <<x, &xxx)
++ 原来的消息清空原有的位置 ( &^ xxxxxx), 然后 | 或上上面得到的结果
+ */
+
 // MessageType returns the message type.
 func (h Header) MessageType() MessageType {
+	/**
+	PReader:
+	h[2] => 0x yyyy yyyy
+	0x80 => 0x 1000 0000
+	h[2] & 0x80 => 仅保留了 0x y000 0000
+	(h[2] & 0x80) >> 7 => 0x 0000 000y
+	因此message Type只保留了1bit, 两种可能性, request & response
+	*/
 	return MessageType(h[2]&0x80) >> 7
 }
 
 // SetMessageType sets message type.
 func (h *Header) SetMessageType(mt MessageType) {
+	/**
+	PReader:
+
+	 */
 	h[2] = h[2] | (byte(mt) << 7)
 }
 
 // IsHeartbeat returns whether the message is heartbeat message.
 func (h Header) IsHeartbeat() bool {
+	/**
+	PReader:
+	0x40 => 0x 0100 0000
+	*/
 	return h[2]&0x40 == 0x40
 }
 
 // SetHeartbeat sets the heartbeat flag.
 func (h *Header) SetHeartbeat(hb bool) {
+	/**
+
+	 */
 	if hb {
 		h[2] = h[2] | 0x40
 	} else {
@@ -159,6 +199,10 @@ func (h *Header) SetHeartbeat(hb bool) {
 // IsOneway returns whether the message is one-way message.
 // If true, server won't send responses.
 func (h Header) IsOneway() bool {
+	/**
+	PReader:
+	0x20 => 0x 0010 0000
+	 */
 	return h[2]&0x20 == 0x20
 }
 
@@ -173,11 +217,21 @@ func (h *Header) SetOneway(oneway bool) {
 
 // CompressType returns compression type of messages.
 func (h Header) CompressType() CompressType {
+	/**
+	PReader:
+	0x1C => 0x 0001 1100
+	(h[2] & 0x1c) >> 2 => 0x 0000 0yyy
+	 */
 	return CompressType((h[2] & 0x1C) >> 2)
 }
 
 // SetCompressType sets the compression type.
 func (h *Header) SetCompressType(ct CompressType) {
+	/**
+	PReader:
+	h[2] & ^ 0x1C => h[2] & 0x 1110 0011 => 0x yyy0 00yy
+	(byte(ct) << 2 ) & 0x1C) => 0x yyyy yy00 & 0x1c =>  0x 000y yy00
+	 */
 	h[2] = (h[2] &^ 0x1C) | ((byte(ct) << 2) & 0x1C)
 }
 
@@ -188,6 +242,12 @@ func (h Header) MessageStatusType() MessageStatusType {
 
 // SetMessageStatusType sets message status type.
 func (h *Header) SetMessageStatusType(mt MessageStatusType) {
+	/**
+	PReader:
+	0x03 => 0x 0000 0011
+	(h[2] &^ 0x03) => 先清空最后两位
+	 | (byte(mt) & 0x03) 然后再把最后两位给补上来
+	 */
 	h[2] = (h[2] &^ 0x03) | (byte(mt) & 0x03)
 }
 
@@ -198,6 +258,9 @@ func (h Header) SerializeType() SerializeType {
 
 // SetSerializeType sets the serialization type.
 func (h *Header) SetSerializeType(st SerializeType) {
+	/**
+	PReader: 0XFO => 0x 1111 0000
+	 */
 	h[3] = (h[3] &^ 0xF0) | (byte(st) << 4)
 }
 

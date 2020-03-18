@@ -8,6 +8,10 @@ import (
 	"github.com/smallnest/rpcx/protocol"
 )
 
+/**
+PReader: 这里的plugin相当于提供了一堆的hooks, 让用户可以自由对各种时间点进行hooks
+ */
+
 //PluginContainer represents a plugin container that defines all methods to manage plugins.
 //And it also defines all extension points.
 type PluginContainer interface {

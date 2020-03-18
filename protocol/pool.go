@@ -2,6 +2,10 @@ package protocol
 
 import "sync"
 
+/**
+PReader: 使用了大量的sync.Pool来进行优化
+https://juejin.im/post/5d4087276fb9a06adb7fbe4a
+ */
 var msgPool = sync.Pool{
 	New: func() interface{} {
 		header := Header([12]byte{})

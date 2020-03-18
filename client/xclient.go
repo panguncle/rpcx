@@ -99,6 +99,11 @@ type xClient struct {
 }
 
 // NewXClient creates a XClient that supports service discovery and service governance.
+/**
+PReader:
+FailMode: 失败的时候的重试模式
+一个XClient只作用于一个service
+ */
 func NewXClient(servicePath string, failMode FailMode, selectMode SelectMode, discovery ServiceDiscovery, option Option) XClient {
 	client := &xClient{
 		failMode:     failMode,

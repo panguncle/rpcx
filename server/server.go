@@ -96,6 +96,7 @@ type Server struct {
 // NewServer returns a server.
 func NewServer(options ...OptionFn) *Server {
 	s := &Server{
+		// PReader: 这里使用了一个pluginContainer, 来注册很多的plugin, 进而开放很多的hook
 		Plugins:    &pluginContainer{},
 		options:    make(map[string]interface{}),
 		activeConn: make(map[net.Conn]struct{}),
@@ -184,7 +185,10 @@ func (s *Server) startShutdownListener() {
 // Serve starts and listens RPC requests.
 // It is blocked until receiving connectings from clients.
 func (s *Server) Serve(network, address string) (err error) {
+	// PReader: 启动signal监听
 	s.startShutdownListener()
+
+	// PReader: 根据network和address创建listener
 	var ln net.Listener
 	ln, err = s.makeListener(network, address)
 	if err != nil {
@@ -222,13 +226,23 @@ func (s *Server) ServeListener(network string, ln net.Listener) (err error) {
 // The service goroutines read requests and then call services to reply to them.
 func (s *Server) serveListener(ln net.Listener) error {
 
+	// tempDelay 用于在accept的时候backOff
 	var tempDelay time.Duration
 
 	s.mu.Lock()
 	s.ln = ln
 	s.mu.Unlock()
 
+	/**
+	Accept 失败的时候作如下判断:
+	1. 是否是Server已经Closed
+	2. 是否是Temporary net error
+	3. listener closed
+
+	使用backoff来代替error返回
+	 */
 	for {
+
 		conn, e := ln.Accept()
 		if e != nil {
 			select {
@@ -297,6 +311,7 @@ func (s *Server) serveByHTTP(ln net.Listener, rpcPath string) {
 func (s *Server) serveConn(conn net.Conn) {
 	defer func() {
 		if err := recover(); err != nil {
+			// PReader: x << y => x * 2 ^ y
 			const size = 64 << 10
 			buf := make([]byte, size)
 			ss := runtime.Stack(buf, false)
@@ -321,6 +336,7 @@ func (s *Server) serveConn(conn net.Conn) {
 
 	if tlsConn, ok := conn.(*tls.Conn); ok {
 		if d := s.readTimeout; d != 0 {
+			// Todo: SetReadline和SetWriteDeadline的用途
 			conn.SetReadDeadline(time.Now().Add(d))
 		}
 		if d := s.writeTimeout; d != 0 {
@@ -332,6 +348,8 @@ func (s *Server) serveConn(conn net.Conn) {
 		}
 	}
 
+	// Todo: 为什么这里使用了bufio, 而不是直接使用conn
+	// 在bufio各个组件内部都维护了一个缓冲区，数据读写操作都直接通过缓存区进行。当发起一次读写操作时，会首先尝试从缓冲区获取数据；只有当缓冲区没有数据时，才会从数据源获取数据更新缓冲
 	r := bufio.NewReaderSize(conn, ReaderBuffsize)
 
 	for {
@@ -359,10 +377,14 @@ func (s *Server) serveConn(conn net.Conn) {
 			return
 		}
 
+		// Todo: 这里再次设置writeDeadline没有用新的时间, 会不会有毒
 		if s.writeTimeout != 0 {
 			conn.SetWriteDeadline(t0.Add(s.writeTimeout))
 		}
 
+		// PReader: 这部分实际上是进行auth
+		// auth在这里如何实现: 即是让用户提供一个auth方法
+		// 然后将请求进行auth
 		ctx = share.WithLocalValue(ctx, StartRequestContextKey, time.Now().UnixNano())
 		var closeConn = false
 		if !req.IsHeartbeat() {
@@ -371,6 +393,7 @@ func (s *Server) serveConn(conn net.Conn) {
 		}
 
 		if err != nil {
+			// PReader: isOneWay就不用回复了
 			if !req.IsOneway() {
 				res := req.Clone()
 				res.SetMessageType(protocol.Response)
@@ -395,10 +418,12 @@ func (s *Server) serveConn(conn net.Conn) {
 			}
 			continue
 		}
+
 		go func() {
 			atomic.AddInt32(&s.handlerMsgNum, 1)
 			defer atomic.AddInt32(&s.handlerMsgNum, -1)
 
+			// 响应心跳包
 			if req.IsHeartbeat() {
 				req.SetMessageType(protocol.Response)
 				data := req.Encode()
@@ -420,6 +445,8 @@ func (s *Server) serveConn(conn net.Conn) {
 
 			s.Plugins.DoPreWriteResponse(newCtx, req, res)
 			if !req.IsOneway() {
+				// PReader: 这里需要注意了, 这里看似没有操作, 其实是
+				// 将resMetadata的k,v拷贝进了res.Metadata
 				if len(resMetadata) > 0 { //copy meta in context to request
 					meta := res.Metadata
 					if meta == nil {
@@ -464,8 +491,10 @@ func (s *Server) readRequest(ctx context.Context, r io.Reader) (req *protocol.Me
 	if err != nil {
 		return nil, err
 	}
-	// pool req?
+	// PReader: 此处使用了sync.Pool来进行优化, 避免了大量对象的分配
 	req = protocol.GetPooledMsg()
+
+	// PReader: 解析到message
 	err = req.Decode(r)
 	if err == io.EOF {
 		return req, err
@@ -524,6 +553,7 @@ func (s *Server) handleRequest(ctx context.Context, req *protocol.Message) (res 
 
 	replyv := argsReplyPools.Get(mtype.ReplyType)
 
+	// PReader: 核心调用代码
 	if mtype.ArgType.Kind() != reflect.Ptr {
 		err = service.call(ctx, mtype, reflect.ValueOf(argv).Elem(), reflect.ValueOf(replyv))
 	} else {
